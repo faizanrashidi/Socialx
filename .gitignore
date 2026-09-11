@@ -16,3 +16,25 @@
 local.properties
 .env
 debug.keystore
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Android signing / certificates / private keys
+*.jks
+*.keystore
+*.p12
+*.pem
+*.key
+*.base64
+debug.keystore
+
+# Firebase
+google-services.json
+
+# Build files
+/build/
+/app/build/
+.gradle/
