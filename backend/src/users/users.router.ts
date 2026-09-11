@@ -1,0 +1,429 @@
+import { Router, Response } from 'express';
+import { prisma } from '../common/prisma';
+import { authenticateToken, AuthRequest } from '../common/auth.middleware';
+
+export const usersRouter = Router();
+
+// Get User Profile by username
+usersRouter.get('/:username', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const currentUserId = req.user!.userId;
+    const username = req.params.username.toLowerCase();
+
+    const user = await prisma.user.findUnique({
+      where: { username },
+      include: {
+        profile: true,
+        followers: { where: { followerId: currentUserId } },
+        posts: {
+          where: { deletedAt: null },
+          orderBy: { createdAt: 'desc' },
+          include: { media: true },
+        },
+        reels: {
+          orderBy: { createdAt: 'desc' },
+        },
+      },
+    });
+
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const isFollowing = user.followers.length > 0;
+    const isSelf = user.id === currentUserId;
+
+    const followRequest = await prisma.followRequest.findUnique({
+      where: {
+        senderId_receiverId: {
+          senderId: currentUserId,
+          receiverId: user.id,
+        },
+      },
+      select: {
+        status: true,
+      },
+    });
+
+    const followRequested =
+      followRequest?.status === 'PENDING';
+
+    // Private account content is visible only to the owner
+    // or an approved follower.
+    const canViewPrivateContent =
+      isSelf || isFollowing || !user.isPrivate;
+
+    const visiblePosts = canViewPrivateContent
+      ? user.posts
+      : [];
+
+    const visibleReels = canViewPrivateContent
+      ? user.reels
+      : [];
+
+    // Check if blocked
+    const isBlocked = await prisma.block.findFirst({
+      where: {
+        OR: [
+          { blockerId: currentUserId, blockedId: user.id },
+          { blockerId: user.id, blockedId: currentUserId },
+        ],
+      },
+    });
+
+    if (isBlocked) {
+      return res.status(403).json({ error: 'User unavailable' });
+    }
+
+    return res.json({
+      id: user.id,
+      username: user.username,
+      displayName: user.profile?.displayName || user.username,
+      avatarUrl: user.profile?.avatarUrl,
+      bio: user.profile?.bio,
+      website: user.profile?.website,
+      location: user.profile?.location,
+      isPrivate: user.isPrivate,
+      isFollowing,
+      followRequested,
+      isSelf,
+      postCount: user.profile?.postCount || user.posts.length,
+      followerCount: user.profile?.followerCount || 0,
+      followingCount: user.profile?.followingCount || 0,
+      posts: visiblePosts,
+      reels: visibleReels,
+    });
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// Follow / Unfollow User
+usersRouter.post('/:id/follow', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const currentUserId = req.user!.userId;
+    const targetUserId = req.params.id;
+
+    if (currentUserId === targetUserId) {
+      return res.status(400).json({ error: 'Cannot follow yourself' });
+    }
+
+    const targetUser = await prisma.user.findUnique({ where: { id: targetUserId } });
+    if (!targetUser) return res.status(404).json({ error: 'Target user not found' });
+
+    const existingFollow = await prisma.follow.findUnique({
+      where: { followerId_followingId: { followerId: currentUserId, followingId: targetUserId } },
+    });
+
+    if (existingFollow) {
+      // Unfollow
+      await prisma.$transaction([
+        prisma.follow.delete({ where: { id: existingFollow.id } }),
+        prisma.profile.update({
+          where: { userId: currentUserId },
+          data: { followingCount: { decrement: 1 } },
+        }),
+        prisma.profile.update({
+          where: { userId: targetUserId },
+          data: { followerCount: { decrement: 1 } },
+        }),
+      ]);
+      return res.json({ following: false, requested: false });
+    }
+
+    // Check if account is private
+    if (targetUser.isPrivate) {
+      const existingReq = await prisma.followRequest.findUnique({
+        where: { senderId_receiverId: { senderId: currentUserId, receiverId: targetUserId } },
+      });
+
+      if (existingReq) {
+        if (existingReq.status === 'PENDING') {
+          return res.json({
+            following: false,
+            requested: true,
+          });
+        }
+
+        await prisma.followRequest.update({
+          where: { id: existingReq.id },
+          data: { status: 'PENDING' },
+        });
+
+        const existingNotification = await prisma.notification.findFirst({
+          where: {
+            userId: targetUserId,
+            actorId: currentUserId,
+            type: 'FOLLOW_REQUEST',
+            isRead: false,
+          },
+        });
+
+        if (!existingNotification) {
+          await prisma.notification.create({
+            data: {
+              userId: targetUserId,
+              actorId: currentUserId,
+              type: 'FOLLOW_REQUEST',
+              message: 'requested to follow you',
+            },
+          });
+        }
+
+        return res.json({
+          following: false,
+          requested: true,
+        });
+      }
+
+      await prisma.followRequest.create({
+        data: { senderId: currentUserId, receiverId: targetUserId },
+      });
+
+      await prisma.notification.create({
+        data: {
+          userId: targetUserId,
+          actorId: currentUserId,
+          type: 'FOLLOW_REQUEST',
+          message: 'requested to follow you',
+        },
+      });
+
+      return res.json({ following: false, requested: true });
+    }
+
+    // Public account -> Direct follow
+    await prisma.$transaction([
+      prisma.follow.create({
+        data: { followerId: currentUserId, followingId: targetUserId },
+      }),
+      prisma.profile.update({
+        where: { userId: currentUserId },
+        data: { followingCount: { increment: 1 } },
+      }),
+      prisma.profile.update({
+        where: { userId: targetUserId },
+        data: { followerCount: { increment: 1 } },
+      }),
+      prisma.notification.create({
+        data: {
+          userId: targetUserId,
+          actorId: currentUserId,
+          type: 'FOLLOW',
+          message: 'started following you',
+        },
+      }),
+    ]);
+
+    return res.json({ following: true, requested: false });
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// Update Profile
+usersRouter.patch('/me/profile', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.user!.userId;
+    const { displayName, bio, website, location, avatarUrl, isPrivate, activityStatus } = req.body;
+
+    const [updatedUser, updatedProfile] = await prisma.$transaction([
+      prisma.user.update({
+        where: { id: userId },
+        data: {
+          isPrivate: isPrivate !== undefined ? isPrivate : undefined,
+          activityStatus: activityStatus !== undefined ? activityStatus : undefined,
+        },
+      }),
+      prisma.profile.update({
+        where: { userId },
+        data: {
+          displayName,
+          bio,
+          website,
+          location,
+          avatarUrl,
+        },
+      }),
+    ]);
+
+    return res.json({ user: updatedUser, profile: updatedProfile });
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// ==================== FOLLOW REQUESTS ====================
+
+// Get pending follow requests received by current user
+usersRouter.get('/me/follow-requests', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.user!.userId;
+
+    const requests = await prisma.followRequest.findMany({
+      where: {
+        receiverId: userId,
+        status: 'PENDING',
+      },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        sender: {
+          include: {
+            profile: true,
+          },
+        },
+      },
+    });
+
+    return res.json({
+      requests: requests.map((request) => ({
+        id: request.id,
+        senderId: request.sender.id,
+        username: request.sender.username,
+        displayName: request.sender.profile?.displayName || request.sender.username,
+        avatarUrl: request.sender.profile?.avatarUrl || null,
+        createdAt: request.createdAt,
+      })),
+    });
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// Accept follow request
+usersRouter.post('/follow-requests/:requestId/accept', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.user!.userId;
+    const requestId = req.params.requestId;
+
+    const request = await prisma.followRequest.findUnique({
+      where: { id: requestId },
+    });
+
+    if (!request) {
+      return res.status(404).json({ error: 'Follow request not found' });
+    }
+
+    if (request.receiverId !== userId) {
+      return res.status(403).json({ error: 'You can only accept requests sent to you' });
+    }
+
+    if (request.status !== 'PENDING') {
+      return res.status(400).json({ error: 'Request is no longer pending' });
+    }
+
+    await prisma.$transaction([
+      prisma.follow.create({
+        data: {
+          followerId: request.senderId,
+          followingId: request.receiverId,
+        },
+      }),
+      prisma.followRequest.update({
+        where: { id: request.id },
+        data: { status: 'ACCEPTED' },
+      }),
+      prisma.profile.update({
+        where: { userId: request.senderId },
+        data: { followingCount: { increment: 1 } },
+      }),
+      prisma.profile.update({
+        where: { userId: request.receiverId },
+        data: { followerCount: { increment: 1 } },
+      }),
+      prisma.notification.create({
+        data: {
+          userId: request.senderId,
+          actorId: request.receiverId,
+          type: 'FOLLOW',
+          message: 'accepted your follow request',
+        },
+      }),
+    ]);
+
+    return res.json({
+      success: true,
+      following: true,
+      requested: false,
+      message: 'Follow request accepted',
+    });
+  } catch (error: any) {
+    console.error('Accept follow request error:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// Reject follow request
+usersRouter.post('/follow-requests/:requestId/reject', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.user!.userId;
+    const requestId = req.params.requestId;
+
+    const request = await prisma.followRequest.findUnique({
+      where: { id: requestId },
+    });
+
+    if (!request) {
+      return res.status(404).json({ error: 'Follow request not found' });
+    }
+
+    if (request.receiverId !== userId) {
+      return res.status(403).json({ error: 'You can only reject requests sent to you' });
+    }
+
+    if (request.status !== 'PENDING') {
+      return res.status(400).json({ error: 'Request is no longer pending' });
+    }
+
+    await prisma.followRequest.update({
+      where: { id: request.id },
+      data: { status: 'REJECTED' },
+    });
+
+    return res.json({
+      success: true,
+      following: false,
+      requested: false,
+      message: 'Follow request rejected',
+    });
+  } catch (error: any) {
+    console.error('Reject follow request error:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// Cancel sent follow request
+usersRouter.delete('/follow-requests/:requestId', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.user!.userId;
+    const requestId = req.params.requestId;
+
+    const request = await prisma.followRequest.findUnique({
+      where: { id: requestId },
+    });
+
+    if (!request) {
+      return res.status(404).json({ error: 'Follow request not found' });
+    }
+
+    if (request.senderId !== userId) {
+      return res.status(403).json({ error: 'You can only cancel your own follow request' });
+    }
+
+    if (request.status !== 'PENDING') {
+      return res.status(400).json({ error: 'Request is no longer pending' });
+    }
+
+    await prisma.followRequest.delete({
+      where: { id: request.id },
+    });
+
+    return res.json({
+      success: true,
+      following: false,
+      requested: false,
+      message: 'Follow request cancelled',
+    });
+  } catch (error: any) {
+    console.error('Cancel follow request error:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});

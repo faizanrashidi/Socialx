@@ -1,0 +1,6 @@
+{
+  "name": "SocialX",
+  "description": "Production-ready social media platform featuring dynamic feeds, 24h stories, reels, real-time messaging, and profile customization.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:pivotX="54"
+        android:pivotY="54">
+        <!-- Main dynamic gradient X wing 1 (top-left to bottom-right) -->
+        <path
+            android:pathData="M33,33 C31.5,34.5 31.5,37 33,38.5 L70,75.5 C71.5,77 74,77 75.5,75.5 C77,74 77,71.5 75.5,70 L38.5,33 C37,31.5 34.5,31.5 33,33 Z">
+            <aapt:attr name="android:fillColor">
+                <gradient
+                    android:endX="76"
+                    android:endY="76"
+                    android:startX="32"
+                    android:startY="32"
+                    android:type="linear">
+                    <item android:offset="0.0" android:color="#FF007A" />
+                    <item android:offset="0.5" android:color="#7928CA" />
+                    <item android:offset="1.0" android:color="#00DFD8" />
+                </gradient>
+            </aapt:attr>
+        </path>
+
+        <!-- Main dynamic gradient X wing 2 (top-right to bottom-left) -->
+        <path
+            android:pathData="M75,33 C76.5,34.5 76.5,37 75,38.5 L38,75.5 C36.5,77 34,77 32.5,75.5 C31,74 31,71.5 32.5,70 L69.5,33 C71,31.5 73.5,31.5 75,33 Z">
+            <aapt:attr name="android:fillColor">
+                <gradient
+                    android:endX="32"
+                    android:endY="76"
+                    android:startX="76"
+                    android:startY="32"
+                    android:type="linear">
+                    <item android:offset="0.0" android:color="#00DFD8" />
+                    <item android:offset="0.5" android:color="#7928CA" />
+                    <item android:offset="1.0" android:color="#FF007A" />
+                </gradient>
+            </aapt:attr>
+        </path>
+
+        <!-- Center Camera / Pulse Aperture Ring -->
+        <path
+            android:pathData="M54,54m-12,0a12,12 0 1,0 24,0a12,12 0 1,0 -24,0"
+            android:strokeColor="#FFFFFF"
+            android:strokeWidth="3.2" />
+
+        <!-- Central Spark Core Dot -->
+        <path
+            android:pathData="M54,54m-4.5,0a4.5,4.5 0 1,0 9,0a4.5,4.5 0 1,0 -9,0"
+            android:fillColor="#FF007A" />
+
+        <!-- Top right accent dot (Story / live pulse indicator) -->
+        <path
+            android:pathData="M68,36m-3,0a3,3 0 1,0 6,0a3,3 0 1,0 -6,0"
+            android:fillColor="#00DFD8" />
+    </group>
+</vector>
