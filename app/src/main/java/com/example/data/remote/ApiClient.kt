@@ -14,7 +14,7 @@ object ApiClient {
     private const val PREF_NAME = "socialx_api_prefs"
     private const val KEY_BASE_URL = "base_url"
     private const val KEY_AUTH_TOKEN = "auth_token"
-    const val DEFAULT_BASE_URL = "http://127.0.0.1:8080/api/"
+    const val DEFAULT_BASE_URL = "http://192.168.31.107:8080/api/"
 
     private var currentBaseUrl = DEFAULT_BASE_URL
     private var authToken: String? = null
