@@ -30,7 +30,7 @@ const io = new SocketIOServer(server, {
   },
 });
 
-const PORT = process.env.PORT || 4000;
+const PORT = process.env.PORT || 8080;
 const JWT_ACCESS_SECRET = process.env.JWT_ACCESS_SECRET || 'socialx_super_secret_access_jwt_key_2026';
 
 // Security & Middleware
